@@ -1,0 +1,13 @@
+{
+    "name": "zhalker/dumb-artifact-for-multi-level-contextual-parsing-in-php",
+    "description": "An unnecessarily complex tool that replaces patterns through multi-level contextual parsing in PHP. Dumb, yet somehow useful",
+    "type": "library",
+    "license": "MIT",
+    "autoload": {
+        "psr-4": {
+            "Zhalker\\DumbArtifactForMultiLevelContextualParsingInPhp\\": "src/"
+        }
+    },
+    "minimum-stability": "stable",
+    "require": {}
+}
