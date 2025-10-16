@@ -5,9 +5,16 @@
     "license": "MIT",
     "autoload": {
         "psr-4": {
-            "Zhalker\\DumbArtifactForMultiLevelContextualParsingInPhp\\": "src/"
+            "DumbContextualParser\\": "src/"
         }
     },
     "minimum-stability": "stable",
-    "require": {}
+    "require": {
+        "php": "^8.0"
+    },
+    "authors": [
+        {
+            "name": "zhalker"
+        }
+    ]
 }
