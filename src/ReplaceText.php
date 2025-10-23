@@ -20,7 +20,7 @@ class ReplaceText {
      *   - If callable: function(string $inner, array $block): string
      * @return string Modified text
      */
-    public static function replace(string $text, string|array $open, string|array $close, string|callable|null $pattern = '".(%s)."'): string {
+    public static function replace(string $text, string|array $open, string|array $close, string|callable|null $pattern = null): string {
         if (Self::$instance === null) {
             Self::$instance = new Self();
         }

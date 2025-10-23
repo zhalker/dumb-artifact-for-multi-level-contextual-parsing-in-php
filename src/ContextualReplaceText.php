@@ -50,24 +50,42 @@ class ContextualReplaceText {
             $text,
             $rule['scope_start'],
             $rule['scope_end'],
-            $rule['self_replace']['open'],
-            $rule['self_replace']['close'],
-            function ($inner, $b) use ($rule) {
+            $rule['self_replace']['block']['open'],
+            $rule['self_replace']['block']['close'],
+            function ($inner) use ($rule) {
                 if (!empty($rule['inner_scopes'])) {
                     foreach ($rule['inner_scopes'] as $innerRule) {
-                        $inner = ReplaceText::replace(
-                            $inner,
-                            $innerRule['self_replace']['open'],
-                            $innerRule['self_replace']['close'],
-                            $innerRule['self_replace']['pattern']
-                        );
+
+                        if (!empty($innerRule['self_replace']['block'])) {
+                            $inner = ReplaceText::replace(
+                                $inner,
+                                $innerRule['self_replace']['block']['open'],
+                                $innerRule['self_replace']['block']['close'],
+                                $innerRule['self_replace']['block']['pattern']
+                            );
+                        }
+
+                        if (!empty($innerRule['self_replace']['token'])) {
+                            $inner = self::processTokenReplacement($inner, $innerRule['self_replace']['token']);
+                        }
                     }
                 }
 
-                return sprintf($rule['self_replace']['pattern'], $inner);
+                return is_callable($rule['self_replace']['block']['pattern']) ? $rule['self_replace']['block']['pattern']($inner) : sprintf($rule['self_replace']['block']['pattern'], $inner);
             }
         );
 
         return $text;
+    }
+
+    private static function processTokenReplacement(string $inner, array $tokenRule): string {
+        $search  = $tokenRule['search'] ?? '';
+        $subject = $tokenRule['subject'] ?? '';
+
+        $inner = preg_match('/^([#~%\/]).+\1[imsxuADSUXJ]*$/', $search)
+            ? preg_replace($search ?? '', $subject ?? '', $inner)
+            : str_replace($search ?? '', $subject ?? '', $inner);
+
+        return $inner;
     }
 }

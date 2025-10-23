@@ -42,13 +42,11 @@ class ScopedReplaceText {
 
             $sectionStart = $start + strlen($startMarker);
 
-            $end = strpos($text, $endMarker, $sectionStart) ?: strlen($text) - strlen($endMarker);
-
-            if ($end === false) {
-                // If no closing marker, append the rest and stop
-                $result .= substr($text, $start);
-                break;
+            if (strpos($text, $endMarker, $sectionStart) === false) {
+                $text .=  ' ' . $endMarker;
             }
+
+            $end = strpos($text, $endMarker, $sectionStart);
 
             $section = substr($text, $sectionStart, $end - $sectionStart);
 
