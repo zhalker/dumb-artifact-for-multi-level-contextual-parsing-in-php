@@ -42,6 +42,31 @@ class ReplaceText {
         return Self::$instance->replaceBlocks($text, $blocks, $pattern);
     }
 
+    public static function customReplace(string $text, string|array $open, string|array $close, callable $pattern): string {
+        if (Self::$instance === null) {
+            Self::$instance = new Self();
+        }
+
+        if (is_string($open)) $open = [$open];
+        if (is_string($close)) $close = [$close];
+
+        if (count($open) != count($close)) {
+            throw new \Exception("Error: open and close arrays must match in length");
+        }
+
+        $strings = [];
+        $blocks = [];
+
+        foreach ($open as $i => $openChar) {
+            $closeChar = $close[$i];
+            $blocks = array_merge($blocks, Self::$instance->findBlocks($text, $openChar, $closeChar));
+        }
+
+        $strings = Self::$instance->getNoCoveredBlocks($text, $blocks);
+
+        return $pattern($text, $strings, $blocks);
+    }
+
     /**
      * Find all blocks delimited by open/close markers.
      */
@@ -50,18 +75,20 @@ class ReplaceText {
         $offset = 0;
 
         while (($start = strpos($text, $open, $offset)) !== false) {
-            if ($this->escapeperhaps($text, $start)) {
+            if ($this->escapePerhaps($text, $start)) {
                 $offset = $start + strlen($open);
                 continue;
             }
 
-            $end = strpos($text, $close, $start + strlen($open));
-            if ($end === false) break;
-
-            if ($this->escapeperhaps($text, $end)) {
-                $offset = $end + strlen($close);
-                continue;
+            $searchFrom = $start + strlen($open);
+            while (($end = strpos($text, $close, $searchFrom)) !== false) {
+                if (!$this->escapePerhaps($text, $end)) {
+                    break;
+                }
+                $searchFrom = $end + strlen($close);
             }
+
+            if ($end === false) break;
 
             $positions[] = [
                 'start' => $start,
@@ -74,6 +101,45 @@ class ReplaceText {
         }
 
         return $positions;
+    }
+
+    /* Get the positions not covered by any block */
+    private function getNoCoveredBlocks(string $text, array $blocks): array {
+        $length = strlen($text);
+        $free_ranges = [];
+
+        // Sort blocks by start position
+        usort($blocks, function ($a, $b) {
+            return $a['start'] <=> $b['start'];
+        });
+
+        $current = 0;
+
+        foreach ($blocks as $block) {
+            $start = (int) $block['start'];
+            $end = (int) $block['end'];
+
+            // If there's a gap before the block, add it as free range
+            if ($current < $start) {
+                $free_ranges[] = [
+                    'start' => $current,
+                    'end' => $start - 1
+                ];
+            }
+
+            // Move current to after the block
+            $current = $end + 1;
+        }
+
+        // Add remaining free range if any
+        if ($current <= $length) {
+            $free_ranges[] = [
+                'start' => $current,
+                'end' => $length
+            ];
+        }
+
+        return $free_ranges;
     }
 
     /**

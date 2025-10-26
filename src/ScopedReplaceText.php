@@ -24,7 +24,7 @@ class ScopedReplaceText {
         string $endMarker,
         string|array $open,
         string|array $close,
-        string|callable|null $pattern = '".(%s)."'
+        string|callable|null $pattern = '%s'
     ): string {
         $result = '';
         $offset = 0;
@@ -63,7 +63,7 @@ class ScopedReplaceText {
         return $result;
     }
 
-    private static function replaceOutsideComments(string $text, string|array $open, string|array $close, string|callable|null $pattern = '".(%s)."'): string {
+    private static function replaceOutsideComments(string $text, string|array $open, string|array $close, string|callable|null $pattern = '%s'): string {
         // Expresiones que detectan comentarios simples y de bloque
         $regex = '/(\/\*[\s\S]*?\*\/|\/\/[^\n]*)/';
         $parts = preg_split($regex, $text, -1, PREG_SPLIT_DELIM_CAPTURE);
