@@ -74,6 +74,59 @@ class ReplaceText {
         $positions = [];
         $offset = 0;
 
+        $isOpenRegex = $this->isRegex($open);
+        $isCloseRegex = $this->isRegex($close);
+
+        while (true) {
+            $startInfo = $this->findPattern($text, $open, $offset, $isOpenRegex);
+            if ($startInfo === null) break;
+
+            $start = $startInfo['pos'];
+            $openLength = $startInfo['length'];
+            $openMatched = $startInfo['matched'] ?? $open; // <-- NUEVO
+
+            if ($this->escapePerhaps($text, $start)) {
+                $offset = $start + $openLength;
+                continue;
+            }
+
+            $searchFrom = $start + $openLength;
+            $endInfo = null;
+
+            while (true) {
+                $endInfo = $this->findPattern($text, $close, $searchFrom, $isCloseRegex);
+                if ($endInfo === null) break;
+
+                $end = $endInfo['pos'];
+
+                if (!$this->escapePerhaps($text, $end)) {
+                    break;
+                }
+
+                $searchFrom = $end + $endInfo['length'];
+            }
+
+            if ($endInfo === null) break;
+
+            $closeMatched = $endInfo['matched'] ?? $close; // <-- NUEVO
+
+            $positions[] = [
+                'start' => $start,
+                'end' => $endInfo['pos'] + $endInfo['length'] - 1,
+                'open' => $openMatched,
+                'close' => $closeMatched,
+            ];
+
+            $offset = $endInfo['pos'] + $endInfo['length'];
+        }
+
+        return $positions;
+    }
+
+    /*private function findBlocks(string $text, string $open, string $close): array {
+        $positions = [];
+        $offset = 0;
+
         while (($start = strpos($text, $open, $offset)) !== false) {
             if ($this->escapePerhaps($text, $start)) {
                 $offset = $start + strlen($open);
@@ -101,7 +154,7 @@ class ReplaceText {
         }
 
         return $positions;
-    }
+    }*/
 
     /* Get the positions not covered by any block */
     private function getNoCoveredBlocks(string $text, array $blocks): array {
@@ -178,5 +231,55 @@ class ReplaceText {
             $i--;
         }
         return ($backslashCount % 2) === 1;
+    }
+
+    private function isRegex(string $pattern): bool {
+        // Verify typical regex delimiters
+        if (strlen($pattern) < 3) return false;
+
+        $delimiters = ['/', '#', '~', '@', ';', '%', '`'];
+        $firstChar = $pattern[0];
+
+        if (!in_array($firstChar, $delimiters)) return false;
+
+        // Search for the last occurrence of the delimiter
+        $lastDelimiterPos = strrpos($pattern, $firstChar);
+        if ($lastDelimiterPos === 0) return false;
+
+        // Verify modifiers
+        $modifiers = substr($pattern, $lastDelimiterPos + 1);
+        if (!preg_match('/^[imsxADSUXJu]*$/', $modifiers)) return false;
+
+        // Try to compile the regex to ensure it's valid
+        return @preg_match($pattern, '') !== false;
+    }
+
+    private function findPattern(string $text, string $pattern, int $offset, bool $isRegex): ?array {
+        if ($isRegex) {
+            $result = preg_match($pattern, $text, $matches, PREG_OFFSET_CAPTURE, $offset);
+
+            if ($result === 1) {
+                $matchIndex = isset($matches[1]) ? 1 : 0;
+                return [
+                    'pos' => $matches[$matchIndex][1],
+                    'length' => strlen($matches[$matchIndex][0]),
+                    'matched' => $matches[$matchIndex][0] // <-- NUEVO
+                ];
+            }
+
+            return null;
+        } else {
+            $pos = strpos($text, $pattern, $offset);
+
+            if ($pos !== false) {
+                return [
+                    'pos' => $pos,
+                    'length' => strlen($pattern),
+                    'matched' => $pattern // <-- NUEVO
+                ];
+            }
+
+            return null;
+        }
     }
 }
