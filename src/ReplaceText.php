@@ -69,10 +69,20 @@ class ReplaceText {
 
     /**
      * Find all blocks delimited by open/close markers.
+     *
+     * @param string $text   Input text
+     * @param string $open   Opening delimiter (literal or regex)
+     * @param string $close  Closing delimiter (literal or regex)
+     * @return array<int, array{open: array<string, mixed>, close: array<string, mixed>|null}>
      */
     private function findBlocks(string $text, string $open, string $close): array {
         $positions = [];
         $offset = 0;
+
+        if ($open === '' || $close === '') {
+            throw new \InvalidArgumentException("Delimiters cannot be empty.");
+        }
+
 
         $isOpenRegex = $this->isRegex($open);
         $isCloseRegex = $this->isRegex($close);
@@ -81,111 +91,94 @@ class ReplaceText {
             $startInfo = $this->findPattern($text, $open, $offset, $isOpenRegex);
             if ($startInfo === null) break;
 
-            $start = $startInfo['pos'];
-            $openLength = $startInfo['length'];
-            $openMatched = $startInfo['matched'] ?? $open; // <-- NUEVO
+            $openStart = $startInfo['match']['start'];
+            $openEnd = $startInfo['match']['end'];
+            $openLength = $startInfo['match']['length'];
+            $openMatched = $startInfo['match']['value'];
+            $openGroups = $startInfo['groups'];
 
-            if ($this->escapePerhaps($text, $start)) {
-                $offset = $start + $openLength;
+            if ($this->escapePerhaps($text, $openStart)) {
+                $offset = $openEnd;
                 continue;
             }
 
-            $searchFrom = $start + $openLength;
+            $searchFrom = $openEnd;
             $endInfo = null;
 
             while (true) {
                 $endInfo = $this->findPattern($text, $close, $searchFrom, $isCloseRegex);
-                if ($endInfo === null) break;
 
-                $end = $endInfo['pos'];
+                if ($endInfo === null) {
 
-                if (!$this->escapePerhaps($text, $end)) {
+                    $positions[] = [
+                        'open' => ['start' => $openStart, 'end' => $openEnd, 'length' => $openLength, 'matched' => $openMatched, 'groups' => $openGroups],
+                        'close' => null,
+                    ];
+
+                    $offset = $openEnd;
+
                     break;
                 }
 
-                $searchFrom = $end + $endInfo['length'];
+                $closeStart = $endInfo['match']['start'];
+                $closeEnd = $endInfo['match']['end'];
+                $closeLength = $endInfo['match']['length'];
+                $closeMatched = $endInfo['match']['value'];
+                $closeGroups = $endInfo['groups'];
+
+                if ($this->escapePerhaps($text, $closeStart)) {
+                    $searchFrom = $closeEnd;
+                    continue;
+                }
+
+                $positions[] = [
+                    'open' => ['start' => $openStart, 'end' => $openEnd, 'length' => $openLength, 'matched' => $openMatched, 'groups' => $openGroups],
+                    'close' => ['start' => $closeStart, 'end' => $closeEnd, 'length' => $closeLength, 'matched' => $closeMatched, 'groups' => $closeGroups],
+                ];
+
+                $offset = $closeEnd;
+
+                break;
             }
-
-            if ($endInfo === null) break;
-
-            $closeMatched = $endInfo['matched'] ?? $close; // <-- NUEVO
-
-            $positions[] = [
-                'start' => $start,
-                'end' => $endInfo['pos'] + $endInfo['length'] - 1,
-                'open' => $openMatched,
-                'close' => $closeMatched,
-            ];
-
-            $offset = $endInfo['pos'] + $endInfo['length'];
         }
 
         return $positions;
     }
 
-    /*private function findBlocks(string $text, string $open, string $close): array {
-        $positions = [];
-        $offset = 0;
-
-        while (($start = strpos($text, $open, $offset)) !== false) {
-            if ($this->escapePerhaps($text, $start)) {
-                $offset = $start + strlen($open);
-                continue;
-            }
-
-            $searchFrom = $start + strlen($open);
-            while (($end = strpos($text, $close, $searchFrom)) !== false) {
-                if (!$this->escapePerhaps($text, $end)) {
-                    break;
-                }
-                $searchFrom = $end + strlen($close);
-            }
-
-            if ($end === false) break;
-
-            $positions[] = [
-                'start' => $start,
-                'end' => $end + strlen($close) - 1,
-                'open' => $open,
-                'close' => $close
-            ];
-
-            $offset = $end + strlen($close);
-        }
-
-        return $positions;
-    }*/
-
-    /* Get the positions not covered by any block */
+    /**
+     * Get positions not covered by any block.
+     *
+     * @param string $text
+     * @param array<int, array{open: array<string, mixed>, close: array<string, mixed>|null}> $blocks
+     * @return array<int, array{start: int, end: int}>
+     */
     private function getNoCoveredBlocks(string $text, array $blocks): array {
         $length = strlen($text);
         $free_ranges = [];
 
-        // Sort blocks by start position
-        usort($blocks, function ($a, $b) {
-            return $a['start'] <=> $b['start'];
-        });
+        // Ordenar bloques por inicio
+        usort($blocks, fn($a, $b) => $a['open']['start'] <=> $b['open']['start']);
 
         $current = 0;
 
         foreach ($blocks as $block) {
-            $start = (int) $block['start'];
-            $end = (int) $block['end'];
+            $start = $block['open']['start'];
+            $end = $block['close']['end'] ?? $block['open']['end'];
 
-            // If there's a gap before the block, add it as free range
+            // Si hay un hueco antes del bloque, añadirlo
             if ($current < $start) {
                 $free_ranges[] = [
                     'start' => $current,
-                    'end' => $start - 1
+                    'end' => $start
                 ];
             }
 
-            // Move current to after the block
-            $current = $end + 1;
+            // Mover current al final del bloque
+            $current = $end;
         }
 
-        // Add remaining free range if any
-        if ($current <= $length) {
+        // Rango libre al final del texto
+        if ($current < $length) {
             $free_ranges[] = [
                 'start' => $current,
                 'end' => $length
@@ -197,23 +190,35 @@ class ReplaceText {
 
     /**
      * Replace detected blocks safely, preserving indices by processing from end to start.
+     *
+     * @param string $text
+     * @param array<int, array{open: array<string, mixed>, close: array<string, mixed>|null}> $blocks
+     * @param string|callable|null $pattern
+     * @return string
      */
     private function replaceBlocks(string $text, array $blocks, string|callable|null $pattern): string {
-        usort($blocks, fn($a, $b) => $b['start'] <=> $a['start']);
+        // Procesar desde el final hacia el inicio
+        usort($blocks, fn($a, $b) => $b['open']['start'] <=> $a['open']['start']);
 
         foreach ($blocks as $b) {
-            $innerStart = $b['start'] + strlen($b['open']);
-            $innerEnd = $b['end'] - strlen($b['close']) + 1;
-            $inner = substr($text, $innerStart, $innerEnd - $innerStart);
+            $openEnd = $b['open']['end'];
+            $closeStart = $b['close']['start'] ?? $openEnd;
+            $closeEnd = $b['close']['end'] ?? $openEnd;
 
-            // Determine replacement
+            $innerLength = $closeStart - $openEnd;
+            $inner = substr($text, $openEnd, $innerLength);
+
+            // Determinar replacement
             if (is_callable($pattern)) {
                 $replacement = $pattern($inner, $b);
             } else {
                 $replacement = sprintf($pattern ?? '%s', $inner);
             }
 
-            $text = substr_replace($text, $replacement, $b['start'], $b['end'] - $b['start'] + 1);
+            // Reemplazar todo el bloque desde open start hasta close end
+            $blockStart = $b['open']['start'];
+            $blockLength = $closeEnd - $blockStart;
+            $text = substr_replace($text, $replacement, $blockStart, $blockLength);
         }
 
         return $text;
@@ -254,32 +259,85 @@ class ReplaceText {
         return @preg_match($pattern, '') !== false;
     }
 
-    private function findPattern(string $text, string $pattern, int $offset, bool $isRegex): ?array {
+    /* Find first regex or literal pattern match with detailed positions */
+    private function findPattern(string $text, string $pattern, int $offset = 0, bool $isRegex = false): ?array {
         if ($isRegex) {
-            $result = preg_match($pattern, $text, $matches, PREG_OFFSET_CAPTURE, $offset);
+            $found = preg_match(
+                $pattern,
+                $text,
+                $matches,
+                PREG_OFFSET_CAPTURE | PREG_UNMATCHED_AS_NULL,
+                $offset
+            );
 
-            if ($result === 1) {
-                $matchIndex = isset($matches[1]) ? 1 : 0;
-                return [
-                    'pos' => $matches[$matchIndex][1],
-                    'length' => strlen($matches[$matchIndex][0]),
-                    'matched' => $matches[$matchIndex][0] // <-- NUEVO
+            // Si no hay coincidencias, devolver null (más semántico que [])
+            if ($found === 0 || $found === false) {
+                return null;
+            }
+
+            // Información del match completo
+            $fullValue = $matches[0][0];
+            $fullStart = $matches[0][1];
+            $fullEnd   = $fullStart + strlen($fullValue);
+            $fullLen   = strlen($fullValue);
+
+            $entry = [
+                'match' => [
+                    'value'  => $fullValue,
+                    'start'  => $fullStart,
+                    'end'    => $fullEnd,
+                    'length' => $fullLen
+                ],
+                'groups' => []
+            ];
+
+            // Iterar sobre todos los grupos (saltando el 0 que es el match completo)
+            foreach ($matches as $key => $group) {
+                if ($key === 0) continue;
+
+                $groupKey = is_int($key) ? "group_{$key}" : $key;
+                $value = $group[0];
+                $start = $group[1];
+
+                if ($value === null || $start === -1) {
+                    $entry['groups'][$groupKey] = [
+                        'value'  => null,
+                        'start'  => null,
+                        'end'    => null,
+                        'length' => 0
+                    ];
+                    continue;
+                }
+
+                $length = strlen($value);
+                $end    = $start + $length;
+
+                $entry['groups'][$groupKey] = [
+                    'value'  => $value,
+                    'start'  => $start,
+                    'end'    => $end,
+                    'length' => $length
                 ];
             }
 
-            return null;
-        } else {
-            $pos = strpos($text, $pattern, $offset);
+            return $entry;
+        }
 
-            if ($pos !== false) {
-                return [
-                    'pos' => $pos,
-                    'length' => strlen($pattern),
-                    'matched' => $pattern // <-- NUEVO
-                ];
-            }
+        // Modo literal (no regex)
+        $pos = strpos($text, $pattern, $offset);
 
+        if ($pos === false) {
             return null;
         }
+
+        return [
+            'match' => [
+                'value'  => $pattern,
+                'start'  => $pos,
+                'end'    => $pos + strlen($pattern),
+                'length' => strlen($pattern)
+            ],
+            'groups' => []
+        ];
     }
 }
